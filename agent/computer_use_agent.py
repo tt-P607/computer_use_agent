@@ -38,7 +38,9 @@ class ComputerUseAgent(BaseAgent):
 
     agent_name: str = "computer_use"
     agent_description: str = (
-        "计算机使用助手，可以帮你完成文件操作、网络请求、截图,发送文件(需显性指定)等任务,最好一次将任务的所有要求说明好,不要多次调用。"
+        "计算机使用助手，可以一次性完成多步骤任务（文件操作、网络请求、截图、发送文件等）。"
+        "重要：请将用户的完整需求一次性传入，不要分步调用本agent。"
+        "例如用户说'下载XX文件并发送给我'，应该将完整需求传入，agent会自动完成下载、保存、发送等所有步骤。"
         "文件操作限制在工作目录内以确保安全。"
     )
 
@@ -65,7 +67,7 @@ class ComputerUseAgent(BaseAgent):
 
     async def execute(
         self,
-        task_description: Annotated[str, "任务描述，详细说明需要完成的操作"],
+        task_description: Annotated[str, "任务描述，详细说明需要完成的操作,请将用户的完整需求一次性传入，不要分步调用本agent"],
         **kwargs: Any,
     ) -> tuple[Annotated[bool, "是否成功"], Annotated[str | dict, "返回结果"]]:
         """执行计算机使用任务
@@ -127,10 +129,31 @@ class ComputerUseAgent(BaseAgent):
             if persona_text:
                 system_prompt_parts.append(f"# 你的身份\n{persona_text}")
             
+            # 列出当前工作目录下的文件
+            import os
+            try:
+                workspace_files = []
+                for item in os.listdir(workspace_dir):
+                    item_path = os.path.join(workspace_dir, item)
+                    if os.path.isdir(item_path):
+                        workspace_files.append(f"[目录] {item}/")
+                    else:
+                        workspace_files.append(f"[文件] {item}")
+                
+                files_list = "\n".join(workspace_files[:50])  # 限制最多显示50个项目
+                if len(workspace_files) > 50:
+                    files_list += f"\n... 还有 {len(workspace_files) - 50} 个项目"
+            except Exception as e:
+                logger.warning(f"列出工作目录文件失败: {e}")
+                files_list = "无法列出文件"
+            
             system_prompt_parts.append(
                 "# 你的能力\n"
                 "你是一个计算机使用助手，可以使用各种工具来完成用户的任务。\n"
                 f"所有文件操作都限制在工作目录{workspace_dir}内,你现在所处的聊天流是{self.stream_id}。\n\n"
+                f"# 当前工作目录内容\n"
+                f"工作目录: {workspace_dir}\n"
+                f"{files_list}\n\n"
                 "# 重要规则\n"
                 "1. 按照逻辑顺序执行所有必要的步骤（例如：先用curl获取内容，再用create_file创建文件，然后用write_file写入内容）\n"
                 "2. 每个步骤都必须实际执行，不要跳过任何步骤\n"
