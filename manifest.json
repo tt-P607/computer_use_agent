@@ -1,0 +1,25 @@
+{
+    "name": "computer_use_agent",
+    "version": "1.0.0",
+    "description": "计算机使用 Agent，提供文件操作、网络请求、截图等功能",
+    "author": "MoFox Team",
+    "dependencies": {
+        "plugins": [],
+        "components": []
+    },
+    "include": [
+        {
+            "component_type": "agent",
+            "component_name": "computer_use",
+            "dependencies": []
+        }
+    ],
+    "entry_point": "plugin.py",
+    "min_core_version": "1.0.0",
+    "python_dependencies": [
+        "aiohttp>=3.8.0",
+        "pillow>=10.0.0",
+        "mss>=9.0.0"
+    ],
+    "dependencies_required": true
+}
