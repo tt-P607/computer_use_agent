@@ -5,6 +5,7 @@ from .file_write import FileWriteTool
 from .file_read import FileReadTool
 from .list_directory import ListDirectoryTool
 from .curl import CurlTool
+from .download import DownloadTool
 from .screenshot import ScreenshotTool
 from .send_message import SendMessageTool
 from .finish_task import FinishTaskTool
@@ -16,6 +17,7 @@ __all__ = [
     "FileReadTool",
     "ListDirectoryTool",
     "CurlTool",
+    "DownloadTool",
     "ScreenshotTool",
     "SendMessageTool",
     "FinishTaskTool",

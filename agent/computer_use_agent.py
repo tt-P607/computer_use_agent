@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Annotated, Any, cast
 
 from plugins.computer_use_agent.config import ComputerUseAgentConfig
+from plugins.computer_use_agent.tools.download import DownloadTool
 from src.core.components import BaseAgent
 from src.core.components.types import ChatType
 from src.kernel.logger import get_logger
@@ -39,7 +40,7 @@ class ComputerUseAgent(BaseAgent):
     agent_name: str = "computer_use"
     agent_description: str = (
         "计算机使用助手，可以一次性完成多步骤任务（文件操作、网络请求、截图、发送文件等）。"
-        "重要：请将用户的完整需求一次性传入，不要分步调用本agent。"
+        "重要：请将用户的完整需求一次性传入，不要分步/多次调用本agent，这会导致用户的token像雪花般消逝。"
         "例如用户说'下载XX文件并发送给我'，应该将完整需求传入，agent会自动完成下载、保存、发送等所有步骤。"
         "文件操作限制在工作目录内以确保安全。"
     )
@@ -62,7 +63,8 @@ class ComputerUseAgent(BaseAgent):
         ScreenshotTool,
         SendMessageTool,
         FinishTaskTool,
-        ListDirectoryTool
+        ListDirectoryTool,
+        DownloadTool
     ]
 
     async def execute(
@@ -154,13 +156,25 @@ class ComputerUseAgent(BaseAgent):
                 f"# 当前工作目录内容\n"
                 f"工作目录: {workspace_dir}\n"
                 f"{files_list}\n\n"
-                "# 重要规则\n"
-                "1. 按照逻辑顺序执行所有必要的步骤（例如：先用curl获取内容，再用create_file创建文件，然后用write_file写入内容）\n"
-                "2. 每个步骤都必须实际执行，不要跳过任何步骤\n"
-                "3. 完成所有操作后，必须调用 finish_task 工具来标记任务完成\n"
-                "4. 只有调用了 finish_task 工具，任务才算真正完成\n"
-                "5. 在调用 finish_task 之前，确保所有步骤都已成功执行,并且确保已经发送消息告诉用户已经完成任务"
-                f"6. 如果用户要你发送文件给他,请调用send_message,stream_id = {self.stream_id},然后将文件的绝对路径传入"
+                "# 最高规则\n"
+                "1. 按照逻辑顺序执行所有必要的步骤（例如：先用download_file下载文件，再用send_message发送文件）\n"
+                "2. **必须检查每个工具的返回值**：工具返回格式为 (success, result)，success=True 表示成功，success=False 表示失败\n"
+                "3. **如果任何步骤失败（success=False），必须立即停止后续操作**，分析失败原因并尝试修复，或向用户报告错误\n"
+                "4. **严禁在步骤失败后继续执行**，更不能在失败后调用 finish_task 标记成功\n"
+                "5. 完成所有操作后，必须调用 finish_task 工具来标记任务完成\n"
+                "6. **只有所有步骤都成功（success=True）执行后才能调用 finish_task**\n\n"
+                "# 发送消息的正确方式\n"
+                "调用 send_message 工具时，如果不提供任何参数（stream_id/group_id/user_id），会自动发送到当前聊天流\n"
+                f"当前聊天流 ID: {self.stream_id}\n"
+                "示例：\n"
+                "  - 发送文本（自动发送到当前流）: send_message(content='任务完成', message_type='text')\n"
+                f"  - 发送文本（明确指定）: send_message(content='任务完成', message_type='text', stream_id='{self.stream_id}')\n"
+                "  - 发送文件（使用相对路径）: send_message(content='filename.jar', message_type='file')\n"
+                "# 下载文件的注意事项\n"
+                "1. **download_file 只接受直接下载链接**（文件 URL，不是网页 URL）\n"
+                "2. 如果 URL 返回 HTML 页面，工具会拒绝下载并提示错误\n"
+                "3. 如果遇到 403 错误或下载到 HTML，说明 URL 不是直链，需要先访问网页找到真正的下载链接\n"
+                "4. 真正的下载链接通常以 .exe、.jar、.zip、.apk 等文件扩展名结尾"
             )
             
             request.add_payload(
@@ -240,6 +254,12 @@ class ComputerUseAgent(BaseAgent):
                             tool_args_dict = tool_args
                         else:
                             tool_args_dict = {}
+                        
+                        # 如果是 send_message 工具且没有提供目标参数，自动注入当前 stream_id
+                        if tool_name in ("send_message", "tool:send_message"):
+                            if not any(k in tool_args_dict for k in ("stream_id", "group_id", "user_id")):
+                                tool_args_dict["stream_id"] = self.stream_id
+                                logger.info(f"   自动注入 stream_id: {self.stream_id}")
                         
                         # 执行工具
                         success, result = await self.execute_local_usable(

@@ -1,7 +1,8 @@
 """消息发送工具"""
 from __future__ import annotations
 
-from typing import Annotated, Any
+from pathlib import Path
+from typing import Annotated, Any, cast
 
 from src.core.components import BaseTool
 from src.core.models.message import MessageType
@@ -19,30 +20,32 @@ class SendMessageTool(BaseTool):
     """
 
     tool_name: str = "send_message"
-    tool_description: str = "向指定的群或好友发送消息（文本、图片、文件等）。必须提供 group_id（群聊）、user_id（私聊）或 stream_id（聊天流ID）之一作为发送目标"
+    tool_description: str = "向指定的群或好友发送消息（文本、图片、文件等）。可以提供 group_id（群聊）、user_id（私聊）或 stream_id（聊天流ID）来指定目标，如果都不提供则发送到当前聊天流"
 
     async def execute(
         self,
-        content: Annotated[str, "消息内容（text=文本内容, image=base64编码, file/voice/video=文件路径(绝对路径)）"],
-        group_id: Annotated[str | None, "【必填其一】目标群号，发送到群聊时必须提供此参数"] = None,
-        user_id: Annotated[str | None, "【必填其一】目标好友QQ号，发送到私聊时必须提供此参数"] = None,
-        stream_id: Annotated[str | None, "【必填其一】目标聊天流ID（高级用法，通常使用 group_id 或 user_id）"] = None,
+        content: Annotated[str, "消息内容（text=文本内容, image=base64编码, file/voice/video=文件路径(相对路径)）"],
+        group_id: Annotated[str | None, "【可选】目标群号，发送到群聊时提供此参数"] = None,
+        user_id: Annotated[str | None, "【可选】目标好友QQ号，发送到私聊时提供此参数"] = None,
+        stream_id: Annotated[str | None, "【可选】目标聊天流ID，如果不提供则发送到当前聊天流"] = None,
         platform: Annotated[str, "平台名称"] = "qq",
         message_type: Annotated[str, "消息类型：text/image/emoji/voice/video/file"] = "text",
     ) -> tuple[bool, str | dict[str, Any]]:
         """发送消息
 
         Args:
-            content: 消息内容（text=文本内容, image=base64编码, file/voice/video=文件路径(绝对路径)）
-            group_id: 【必填其一】目标群号，发送到群聊时必须提供
-            user_id: 【必填其一】目标好友QQ号，发送到私聊时必须提供
-            stream_id: 【必填其一】目标聊天流ID（高级用法，通常使用 group_id 或 user_id）
+            content: 消息内容（text=文本内容, image=base64编码, file/voice/video=文件路径(相对路径)）
+            group_id: 【可选】目标群号，发送到群聊时提供
+            user_id: 【可选】目标好友QQ号，发送到私聊时提供
+            stream_id: 【可选】目标聊天流ID，如果不提供则发送到当前聊天流
             platform: 平台名称
             message_type: 消息类型
 
         Returns:
             (是否成功, 结果信息)
         """
+        from ..config import ComputerUseAgentConfig
+        config = cast(ComputerUseAgentConfig, self.plugin.config)
         try:
             # 获取目标 stream_id
             target_stream_id = stream_id
@@ -68,6 +71,10 @@ class SendMessageTool(BaseTool):
                 success = await send_text(content, target_stream_id, platform)
             elif message_type == "image":
                 success = await send_image(content, target_stream_id, platform)
+            elif message_type == "file":
+                msg_type =  MessageType(message_type)
+                workspace = config.security.workspace_directory
+                content = str(Path(workspace) / content)
             else:
                 # 使用自定义类型
                 try:
