@@ -27,8 +27,8 @@ class ScreenshotTool(BaseTool):
     async def execute(
         self,
         monitor: Annotated[int, "显示器编号（1=主显示器，0=所有显示器）"] = 1,
-        filename: Annotated[str | None, "自定义文件名（不含扩展名），留空则自动生成"] = None,
-        save_path: Annotated[str, "保存路径（相对于工作目录的路径）"] = "screenshots",
+        filename: Annotated[str | None, "自定义文件名（不含扩展名），留空则自动生成。不要包含路径分隔符，仅填文件名本身"] = None,
+        save_path: Annotated[str, "保存目录（相对于工作目录的子目录名，不是文件名），默认保存到 screenshots/目录"] = "screenshots",
     ) -> tuple[bool, str | dict[str, Any]]:
         """截取屏幕
 
@@ -50,6 +50,16 @@ class ScreenshotTool(BaseTool):
             max_width = config.screenshot.max_width
             max_height = config.screenshot.max_height
             workspace_dir = config.security.workspace_directory
+
+            # 兼容 LLM 将完整路径（含扩展名）误填入 save_path 的情况：
+            # 若 save_path 带有图片扩展名，自动拆分为目录 + 文件名
+            save_path_obj = Path(save_path)
+            image_exts = {".png", ".jpg", ".jpeg"}
+            if save_path_obj.suffix.lower() in image_exts:
+                # 最后一段视为文件名（去掉扩展名），父路径视为目录
+                if not filename:
+                    filename = save_path_obj.stem  # 不含扩展名
+                save_path = str(save_path_obj.parent) if str(save_path_obj.parent) != "." else "screenshots"
 
             # 构建保存目录（相对于工作目录）
             save_dir = Path(workspace_dir) / save_path
@@ -104,7 +114,7 @@ class ScreenshotTool(BaseTool):
                     "width": img.width,
                     "height": img.height,
                     "monitor": monitor,
-                    "filesize_kb": round(os.path.getsize(filepath) / 1024, 2)
+                    "filesize_kb": round(os.path.getsize(filepath) / 1024, 2),
                 }
 
         except Exception as e:

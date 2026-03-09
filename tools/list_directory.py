@@ -1,11 +1,11 @@
 """目录列表工具"""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from src.core.components import BaseTool
 from src.kernel.logger import get_logger
+from ..utils import get_workspace, resolve_in_workspace
 
 logger = get_logger("list_directory_tool")
 
@@ -36,22 +36,17 @@ class ListDirectoryTool(BaseTool):
             (是否成功, 目录内容或错误信息)
         """
         try:
-            # 获取配置
-            from ..config import ComputerUseAgentConfig
-            
-            config = cast(ComputerUseAgentConfig, self.plugin.config)
-            workspace_dir = config.security.workspace_directory
+            # 获取工作区目录
+            workspace = get_workspace(self.plugin)
 
-            # 构建完整路径
-            workspace_path = Path(workspace_dir)
+            # 解析目标目录（含沙盒安全检查）
             if directory_path:
-                full_path = (workspace_path / directory_path).resolve()
+                try:
+                    full_path = resolve_in_workspace(workspace, directory_path)
+                except ValueError as e:
+                    return False, {"error": str(e)}
             else:
-                full_path = workspace_path.resolve()
-
-            # 安全检查
-            if not str(full_path).startswith(str(workspace_path.resolve())):
-                return False, {"error": "路径超出工作目录范围"}
+                full_path = workspace
 
             # 检查目录是否存在
             if not full_path.exists():
@@ -77,7 +72,7 @@ class ListDirectoryTool(BaseTool):
                 item_info = {
                     "name": item.name,
                     "type": "directory" if item.is_dir() else "file",
-                    "path": str(item.relative_to(workspace_path))
+                    "path": str(item.relative_to(workspace))
                 }
                 
                 # 如果是文件，添加额外信息

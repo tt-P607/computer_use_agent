@@ -1,11 +1,11 @@
 """文件创建工具"""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Any, cast
 
 from src.core.components import BaseTool
 from src.kernel.logger import get_logger
+from ..utils import get_workspace, resolve_in_workspace
 
 logger = get_logger("file_create_tool")
 
@@ -34,22 +34,19 @@ class FileCreateTool(BaseTool):
             (是否成功, 结果信息)
         """
         try:
-            # 获取配置
             from ..config import ComputerUseAgentConfig
-            
+
             config = cast(ComputerUseAgentConfig, self.plugin.config)
-            workspace_dir = config.security.workspace_directory
             allowed_extensions = config.security.allowed_file_extensions
             max_size_mb = config.security.max_file_size_mb
             enable_dir_creation = config.security.enable_directory_creation
 
-            # 构建完整路径
-            workspace_path = Path(workspace_dir)
-            full_path = (workspace_path / file_path).resolve()
-
-            # 安全检查：确保路径在工作目录内
-            if not str(full_path).startswith(str(workspace_path.resolve())):
-                return False, {"error": "路径超出工作目录范围，操作被拒绝"}
+            # 获取工作区目录并解析目标路径（同时执行沙盒安全检查）
+            workspace = get_workspace(self.plugin)
+            try:
+                full_path = resolve_in_workspace(workspace, file_path)
+            except ValueError as e:
+                return False, {"error": str(e)}
 
             # 检查文件扩展名
             if allowed_extensions and full_path.suffix not in allowed_extensions:
