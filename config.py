@@ -121,6 +121,27 @@ class ComputerUseAgentConfig(BaseConfig):
             ),
         )
 
+    @config_section("model")
+    class ModelSection(SectionBase):
+        """执行模型配置"""
+
+        model_name: str = Field(
+            default="",
+            description=(
+                "Agent 执行所用的模型名称（对应 config/model.toml 中 [[models]] 的 name 字段）。\n"
+                "留空时回退到任务组 'actor' 的默认配置。\n"
+                "示例：\"gemini-2.5-flash-preview\""
+            ),
+        )
+        temperature: float = Field(
+            default=0.5,
+            description="模型采样温度（0.0-2.0），仅在 model_name 非空时生效。",
+        )
+        max_tokens: int = Field(
+            default=8192,
+            description="最大输出 token 数，仅在 model_name 非空时生效。",
+        )
+
     # 配置节实例
     plugin: PluginSection = Field(default_factory=PluginSection)
     security: SecuritySection = Field(default_factory=SecuritySection)
@@ -128,3 +149,4 @@ class ComputerUseAgentConfig(BaseConfig):
     screenshot: ScreenshotSection = Field(default_factory=ScreenshotSection)
     file_server: FileServerSection = Field(default_factory=FileServerSection)
     prompt: PromptSection = Field(default_factory=PromptSection)
+    model: ModelSection = Field(default_factory=ModelSection)

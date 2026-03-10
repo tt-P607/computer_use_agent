@@ -88,15 +88,25 @@ class ComputerUseAgent(BaseAgent):
             (是否成功, 结果信息)
         """
         try:
-            from src.app.plugin_system.api.llm_api import get_model_set_by_task
+            from src.app.plugin_system.api.llm_api import get_model_set_by_name, get_model_set_by_task
 
             config = cast(ComputerUseAgentConfig, self.plugin.config)
             workspace_dir = config.security.workspace_directory
 
             logger.info(f"开始执行任务: {task_description}")
 
-            # 获取模型配置并创建请求（自动注入所有私有工具）
-            model_set = get_model_set_by_task("actor")
+            # 获取模型配置：优先使用配置中指定的具体模型名，回退到任务组 actor
+            model_cfg = config.model
+            if model_cfg.model_name:
+                model_set = get_model_set_by_name(
+                    model_cfg.model_name,
+                    temperature=model_cfg.temperature,
+                    max_tokens=model_cfg.max_tokens,
+                )
+                logger.info(f"使用模型: {model_cfg.model_name}")
+            else:
+                model_set = get_model_set_by_task("actor")
+                logger.info("使用任务组模型: actor")
             request = self.create_llm_request(
                 model_set=model_set,
                 request_name="computer_use_task",
