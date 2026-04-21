@@ -258,13 +258,21 @@ class ComputerUseAgent(BaseAgent):
             else:
                 tool_args_dict = {}
 
-            # send_message：若未指定目标，自动注入当前 stream_id
-            # 使用 in 判断，兼容 "send_message" 和 "tool-send_message" 两种 schema 名
-            if "send_message" in tool_name and not any(
-                k in tool_args_dict for k in ("stream_id", "group_id", "user_id")
-            ):
-                tool_args_dict["stream_id"] = self.stream_id
-                logger.info(f"    自动注入 stream_id: {self.stream_id}")
+            # send_message：若未指定有效目标，自动注入当前 stream_id
+            if "send_message" in tool_name:
+                # stream_id 必须是 64 位 hex 字符串才视为有效
+                stream_val = str(tool_args_dict.get("stream_id") or "")
+                stream_valid = len(stream_val) == 64 and all(c in "0123456789abcdefABCDEF" for c in stream_val)
+                # group_id / user_id 必须是纯数字字符串才视为有效
+                group_val = str(tool_args_dict.get("group_id") or "")
+                user_val = str(tool_args_dict.get("user_id") or "")
+                group_valid = group_val.isdigit()
+                user_valid = user_val.isdigit()
+                if not stream_valid and not group_valid and not user_valid:
+                    tool_args_dict["stream_id"] = self.stream_id
+                    tool_args_dict.pop("group_id", None)
+                    tool_args_dict.pop("user_id", None)
+                    logger.info(f"    自动注入 stream_id: {self.stream_id}")
 
             # 执行工具（execute_local_usable 内部已通过 _strip_usable_prefix 处理别名）
             try:

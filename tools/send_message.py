@@ -26,9 +26,10 @@ class SendMessageTool(BaseTool):
 
     tool_name: str = "send_message"
     tool_description: str = (
-        "向指定的群或好友发送消息（文本、图片、文件等）。"
-        "可以提供 group_id（群聊）、user_id（私聊）或 stream_id（聊天流ID）"
-        "来指定目标，如果都不提供则发送到当前聊天流。"
+        "向指定的群或好友发送多媒体消息（图片、文件、语音等）。"
+        "【警告】此工具严禁发送普通纯文本消息！你只是底层执行组件，人类对话应留给上层系统。"
+        "发送的内容(content)必须是真实存在的本地文件路径（截图等）或有效的URL。"
+        "可以提供 group_id（群聊）、user_id（私聊）或 stream_id（聊天流ID）来指定目标，如果都不提供则发送到当前聊天流。"
     )
 
     def _get_config(self) -> ComputerUseAgentConfig:
@@ -101,8 +102,7 @@ class SendMessageTool(BaseTool):
 
         abs_path = self._resolve_abs_path(config, relative_or_abs)
         if not abs_path.exists():
-            logger.warning(f"媒体文件不存在: {abs_path}")
-            return str(abs_path)
+            raise FileNotFoundError(f"媒体文件不存在，请检查路径是否正确: {abs_path}")
 
         if config.file_server.enable:
             url = self._to_http_url(config, abs_path)
@@ -115,12 +115,12 @@ class SendMessageTool(BaseTool):
 
     async def execute(
         self,
-        content: Annotated[str, "消息内容（text=文本内容, image=base64编码, file/voice/video=文件路径(相对路径)）"],
+        content: Annotated[str, "消息内容（文本内容，或文件相对路径/绝对路径/URL）"],
         group_id: Annotated[str | None, "【可选】目标群号，发送到群聊时提供此参数"] = None,
         user_id: Annotated[str | None, "【可选】目标好友QQ号，发送到私聊时提供此参数"] = None,
         stream_id: Annotated[str | None, "【可选】目标聊天流ID，如果不提供则发送到当前聊天流"] = None,
         platform: Annotated[str, "平台名称"] = "qq",
-        message_type: Annotated[str, "消息类型：text/image/emoji/voice/video/file"] = "text",
+        message_type: Annotated[str, "消息类型：auto(自动推断)/text/image/emoji/voice/video/file"] = "auto",
     ) -> tuple[bool, str | dict[str, Any]]:
         """发送消息。
 
@@ -138,7 +138,19 @@ class SendMessageTool(BaseTool):
         config = self._get_config()
         try:
             # 解析目标 stream_id
-            target_stream_id = stream_id
+            # 过滤掉 LLM 可能填入的任意非法占位符：
+            #   stream_id 须为 64 位 hex；group_id/user_id 须为纯数字
+            _stream = str(stream_id or "")
+            _group = str(group_id or "")
+            _user = str(user_id or "")
+            _stream_valid = len(_stream) == 64 and all(c in "0123456789abcdefABCDEF" for c in _stream)
+            _group_valid = _group.isdigit()
+            _user_valid = _user.isdigit()
+
+            target_stream_id = _stream if _stream_valid else None
+            group_id = _group if _group_valid else None
+            user_id = _user if _user_valid else None
+
             if not target_stream_id:
                 if group_id or user_id:
                     stream = await get_or_create_stream(
@@ -149,19 +161,45 @@ class SendMessageTool(BaseTool):
                     )
                     target_stream_id = stream.stream_id
                 else:
-                    return False, {"error": "必须提供 group_id、user_id 或 stream_id 之一"}
+                    return False, {"error": "必须提供有效的 group_id（纯数字）、user_id（纯数字）或 stream_id（64位hex）之一"}
 
             logger.info(f"准备发送消息: {message_type} -> {target_stream_id}")
 
+            # 自动推断消息类型
+            if message_type == "auto":
+                try:
+                    # 先判断是否为 URL 等格式
+                    if content.startswith(("http://", "https://", "base64://")):
+                        message_type = "image" # 简化处理，默认 URL 是图片
+                    else:
+                        test_path = self._resolve_abs_path(config, content)
+                        if test_path.exists():
+                            ext = test_path.suffix.lower()
+                            if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}:
+                                message_type = "image"
+                            elif ext in {".mp4", ".avi", ".mkv", ".mov"}:
+                                message_type = "video"
+                            elif ext in {".mp3", ".wav", ".ogg", ".silk", ".slk", ".amr"}:
+                                message_type = "voice"
+                            else:
+                                message_type = "file"
+                            logger.info(f"自动推断消息类型为: {message_type}")
+                        else:
+                            message_type = "text"
+                except Exception:
+                    message_type = "text"
+
             # 根据消息类型分发处理
             if message_type == "text":
-                success = await send_text(content, target_stream_id, platform)
+                return False, {"error": "权限被拒绝：你不能发送普通文本消息。此Agent没有说话的权利，仅用于底层执行。语言交流请交给上层主角色处理。你只被允许通过此工具发送文件、图片(image)等多媒体内容。如果要发送截图，请确保传入真实且存在的绝对/相对路径。"}
             elif message_type == "image":
                 data = self._resolve_media_content(config, content)
                 success = await send_image(data, target_stream_id, platform)
             elif message_type == "file":
                 # 文件类型仍使用路径（napcat 支持通过路径发送文件）
                 abs_path = self._resolve_abs_path(config, content)
+                if not abs_path.exists():
+                    raise FileNotFoundError(f"发送的文件不存在，请检查路径是否正确: {abs_path}")
                 resolved = to_wsl_path(str(abs_path)) if config.security.wsl_mode else str(abs_path)
                 logger.info(f"文件路径解析: {content!r} -> {resolved!r}")
                 success = await send_custom(resolved, MessageType.FILE, target_stream_id, platform)

@@ -22,7 +22,11 @@ class ScreenshotTool(BaseTool):
     """
 
     tool_name: str = "screenshot"
-    tool_description: str = "截取当前屏幕并保存为图片文件"
+    tool_description: str = (
+        "截取当前屏幕并保存为图片文件。"
+        "【重要提示】如果你需要发送截图，请勿在同一轮中和发送工具(send_message)一起调用！"
+        "你必须先调用本工具，等待本工具返回正确的实际图片路径后，再在下一轮调用发送工具。"
+    )
 
     async def execute(
         self,
@@ -55,11 +59,20 @@ class ScreenshotTool(BaseTool):
             # 若 save_path 带有图片扩展名，自动拆分为目录 + 文件名
             save_path_obj = Path(save_path)
             image_exts = {".png", ".jpg", ".jpeg"}
+            custom_ext = None
             if save_path_obj.suffix.lower() in image_exts:
                 # 最后一段视为文件名（去掉扩展名），父路径视为目录
                 if not filename:
                     filename = save_path_obj.stem  # 不含扩展名
+                custom_ext = save_path_obj.suffix.lower()
                 save_path = str(save_path_obj.parent) if str(save_path_obj.parent) != "." else "screenshots"
+            
+            # 兼容 filename 带有扩展名的情况
+            if filename:
+                filename_obj = Path(filename)
+                if filename_obj.suffix.lower() in image_exts:
+                    custom_ext = filename_obj.suffix.lower()
+                    filename = filename_obj.stem
 
             # 构建保存目录（相对于工作目录）
             save_dir = Path(workspace_dir) / save_path
@@ -73,7 +86,12 @@ class ScreenshotTool(BaseTool):
                 file_basename = f"screenshot_{timestamp}"
             
             # 添加扩展名
-            file_ext = ".jpg" if screenshot_format.lower() == "jpeg" else ".png"
+            if custom_ext:
+                file_ext = custom_ext
+                screenshot_format = "jpeg" if custom_ext in {".jpg", ".jpeg"} else "png"
+            else:
+                file_ext = ".jpg" if screenshot_format.lower() == "jpeg" else ".png"
+            
             filepath = save_dir / f"{file_basename}{file_ext}"
             
             # 如果文件已存在，添加序号
@@ -107,14 +125,21 @@ class ScreenshotTool(BaseTool):
                 else:
                     img.save(filepath, format="PNG")
 
-                logger.info(f"截图成功: 显示器 {monitor}, 尺寸 {img.width}x{img.height}, 保存至 {filepath}")
+                abs_filepath = filepath.resolve()
+                workspace_root = Path(workspace_dir).resolve()
+                try:
+                    workspace_rel = abs_filepath.relative_to(workspace_root).as_posix()
+                except ValueError:
+                    workspace_rel = str(abs_filepath)
+
+                logger.info(f"截图成功: 显示器 {monitor}, 尺寸 {img.width}x{img.height}, 保存至 {abs_filepath}")
                 return True, {
-                    "filepath": str(filepath),
+                    "filepath": workspace_rel,
                     "format": screenshot_format,
                     "width": img.width,
                     "height": img.height,
                     "monitor": monitor,
-                    "filesize_kb": round(os.path.getsize(filepath) / 1024, 2),
+                    "filesize_kb": round(os.path.getsize(abs_filepath) / 1024, 2),
                 }
 
         except Exception as e:
